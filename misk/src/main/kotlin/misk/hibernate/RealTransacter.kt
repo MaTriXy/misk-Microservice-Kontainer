@@ -1,24 +1,44 @@
 package misk.hibernate
 
 import com.google.common.collect.ImmutableSet
+import misk.backoff.ExponentialBackoff
+import misk.backoff.retry
 import misk.jdbc.DataSourceConfig
 import misk.jdbc.DataSourceType
 import org.hibernate.SessionFactory
+import org.hibernate.StaleObjectStateException
+import org.hibernate.exception.LockAcquisitionException
 import java.sql.Connection
 import java.sql.ResultSet
+import java.time.Duration
+import javax.persistence.OptimisticLockException
 import kotlin.reflect.KClass
 
-internal class RealTransacter(
+internal class RealTransacter private constructor(
   private val sessionFactory: SessionFactory,
-  private val config: DataSourceConfig
+  private val config: DataSourceConfig,
+  private val threadLocalSession: ThreadLocal<Session>,
+  private val options: TransacterOptions
 ) : Transacter {
 
-  private val threadLocalSession = ThreadLocal<Session>()
+  constructor(sessionFactory: SessionFactory, config: DataSourceConfig) :
+      this(sessionFactory, config, ThreadLocal(), TransacterOptions())
 
   override val inTransaction: Boolean
     get() = threadLocalSession.get() != null
 
   override fun <T> transaction(lambda: (session: Session) -> T): T {
+    return when {
+      options.maxAttempts > 1 -> {
+        val backoff = ExponentialBackoff(Duration.ZERO, Duration.ZERO)
+        retry(options.maxAttempts, backoff, ::isRetryable) { transactionInternal(lambda) }
+      }
+      options.maxAttempts == 1 -> transactionInternal(lambda)
+      else -> throw IllegalArgumentException()
+    }
+  }
+
+  private fun <T> transactionInternal(lambda: (session: Session) -> T): T {
     return withSession { session ->
       val transaction = session.hibernateSession.beginTransaction()!!
       val result: T
@@ -37,6 +57,16 @@ internal class RealTransacter(
         throw e
       }
     }
+  }
+
+  override fun retries(numRetries: Int): Transacter {
+    require(numRetries >= 0)
+    return RealTransacter(
+      sessionFactory,
+      config,
+      threadLocalSession,
+      options.copy(maxAttempts = numRetries + 1)
+    )
   }
 
   private fun <T> withSession(lambda: (session: Session) -> T): T {
@@ -59,6 +89,22 @@ internal class RealTransacter(
       threadLocalSession.remove()
     }
   }
+
+  private fun isRetryable(e: Exception): Boolean {
+    // TODO(jmuia): check the causal chain.
+    return when (e) {
+      is RetryTransactionException,
+      is StaleObjectStateException,
+      is LockAcquisitionException,
+      is OptimisticLockException -> true
+      else -> false
+    }
+  }
+
+  // NB: all options should be immutable types as copy() is shallow.
+  internal data class TransacterOptions(
+    val maxAttempts: Int = 3
+  )
 
   internal class RealSession(
     val session: org.hibernate.Session,

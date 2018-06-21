@@ -16,8 +16,21 @@ interface Transacter {
    * It is an error to start a transaction if another transaction is already in progress.
    */
   fun <T> transaction(lambda: (session: Session) -> T): T
+
+  fun retries(numRetries: Int): Transacter
+  fun noRetries(): Transacter = retries(0)
 }
 
 fun Transacter.shards() = transaction { it.shards() }
 fun <T> Transacter.transaction(shard: Shard, lambda: (session: Session) -> T) =
     transaction { it.target(shard) { lambda(it) } }
+
+/**
+ * Thrown to explicitly trigger a retry, subject to retry limits and config such as noRetries().
+ */
+class RetryTransactionException : Exception {
+  constructor() : super()
+  constructor(message: String) : super(message)
+  constructor(message: String, cause: Throwable) : super(message, cause)
+  constructor(cause: Throwable) : super(cause)
+}
