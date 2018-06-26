@@ -4,6 +4,13 @@ jdk:
   - oraclejdk8
   - oraclejdk9
 
+before_script:
+  - pushd misk/src/test/resources/misk/hibernate
+  - docker-compose up -d
+  - sleep 10
+  - popd
+  - docker ps -a
+
 script:
   - ./gradlew test
 
@@ -18,3 +25,4 @@ cache:
 
 services:
   - mysql
+  - docker

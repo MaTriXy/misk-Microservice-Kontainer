@@ -11,7 +11,7 @@ services:
       "-mysql_bind_host=0.0.0.0",
       "-schema_dir=schema",
       "-keyspaces=movies,actors",
-      "--num_shards=2,1",
+      "-num_shards=2,1",
     ]
     ports:
       - "27000:27000"

@@ -20,7 +20,7 @@ class MoviesTestModule : KAbstractModule() {
     install(Modules.override(MiskModule()).with(FakeClockModule()))
     install(EnvironmentModule(Environment.TESTING))
 
-    val config = MiskConfig.load<MoviesConfig>("moviestestmodule", Environment.TESTING)
+    val config = MiskConfig.load<MoviesConfig>("moviestestmodule_vitess", Environment.TESTING)
     install(HibernateTestingModule(Movies::class))
     install(HibernateModule(Movies::class, config.data_source))
     install(object : HibernateEntityModule(Movies::class) {
